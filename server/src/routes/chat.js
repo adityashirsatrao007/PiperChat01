@@ -377,4 +377,74 @@ router.post("/delete_server_message", deleteServerMessageValidator, validate, as
   }
 });
 
+router.post("/toggle_reaction", async (req, res) => {
+  const { server_id, channel_id, timestamp, sender_id, emoji } = req.body;
+  const user = getAuthorizedUser(req, res);
+  if (!user) return;
+
+  if (!server_id || !channel_id || !timestamp || !sender_id || !emoji) {
+    return res.status(400).json({ status: 400, message: "Invalid input" });
+  }
+
+  try {
+    const chatDoc = await Chat.findOne({
+      server_id,
+      "channels.channel_id": channel_id,
+    });
+    if (!chatDoc) {
+      return res.status(404).json({ status: 404, message: "Chat not found" });
+    }
+
+    const channel = chatDoc.channels.find(
+      (entry) => entry.channel_id === channel_id,
+    );
+    const message = findChatMessage(channel, timestamp, sender_id);
+    if (!message) {
+      return res.status(404).json({ status: 404, message: "Message not found" });
+    }
+
+    if (!message.reactions) {
+      message.reactions = {};
+    }
+
+    const reactors = message.reactions[emoji] || [];
+    const userId = user.id;
+    const idx = reactors.indexOf(userId);
+
+    if (idx === -1) {
+      reactors.push(userId);
+    } else {
+      reactors.splice(idx, 1);
+    }
+
+    if (reactors.length === 0) {
+      delete message.reactions[emoji];
+    } else {
+      message.reactions[emoji] = reactors;
+    }
+
+    await chatDoc.save();
+    await cache.del(`chat:${server_id}:${channel_id}`);
+
+    const io = getIO();
+    if (io) {
+      io.to(`channel:${channel_id}`).emit("server_message_reaction_updated", {
+        timestamp,
+        sender_id,
+        emoji,
+        reactors: message.reactions[emoji] || [],
+        reactions: message.reactions || {},
+      });
+    }
+
+    res.status(200).json({
+      status: 200,
+      reactions: message.reactions || {},
+    });
+  } catch (error) {
+    logger.error(`Error toggling reaction: ${error.message}`);
+    res.status(500).json({ status: 500, message: "Failed to toggle reaction" });
+  }
+});
+
 export default router;

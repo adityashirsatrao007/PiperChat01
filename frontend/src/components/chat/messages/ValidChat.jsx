@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Hash, Pencil, Trash2, Save, SendHorizontal, Loader2, AlertCircle, Pin } from "lucide-react";
+import { Hash, Pencil, Trash2, Save, SendHorizontal, Loader2, AlertCircle, Pin, SmilePlus } from "lucide-react";
 import socket from "../../socket/Socket";
 import { useParams } from "react-router-dom";
 import { clear_channel_unread } from "../../../store/unreadSlice";
@@ -33,6 +33,7 @@ function ValidChat() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [typingUsers, setTypingUsers] = useState({});
+  const [reactionPopup, setReactionPopup] = useState(null);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const typingUserTimeoutsRef = useRef({});
@@ -230,6 +231,27 @@ function ValidChat() {
     }
   };
 
+  const toggleReaction = async (message, emoji) => {
+    try {
+      await fetch(`${url}/chat/toggle_reaction`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-auth-token": localStorage.getItem("token"),
+        },
+        body: JSON.stringify({
+          server_id,
+          channel_id,
+          timestamp: message.timestamp,
+          sender_id: message.sender_id,
+          emoji,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to toggle reaction:", err);
+    }
+  };
+
   const togglePinMessage = async (message) => {
     const res = await fetch(`${url}/chat/toggle_server_message_pin`, {
       method: "POST",
@@ -318,6 +340,17 @@ function ValidChat() {
       );
     };
 
+    const handleReactionUpdated = (message_data) => {
+      setall_messages((currentMessages) =>
+        (currentMessages || []).map((entry) =>
+          String(entry.timestamp) === String(message_data.timestamp) &&
+          entry.sender_id === message_data.sender_id
+            ? { ...entry, reactions: message_data.reactions }
+            : entry
+        )
+      );
+    };
+
     const handleTyping = (typingData) => {
       if (
         String(typingData?.server_id) !== String(server_id) ||
@@ -365,6 +398,7 @@ function ValidChat() {
     socket.on("server_message_updated", handleUpdatedMessage);
     socket.on("server_message_deleted", handleDeletedMessage);
     socket.on("server_message_pin_updated", handlePinUpdatedMessage);
+    socket.on("server_message_reaction_updated", handleReactionUpdated);
     socket.on("server_typing", handleTyping);
     socket.on("server_stop_typing", handleStopTyping);
 
@@ -373,6 +407,7 @@ function ValidChat() {
       socket.off("server_message_updated", handleUpdatedMessage);
       socket.off("server_message_deleted", handleDeletedMessage);
       socket.off("server_message_pin_updated", handlePinUpdatedMessage);
+      socket.off("server_message_reaction_updated", handleReactionUpdated);
       socket.off("server_typing", handleTyping);
       socket.off("server_stop_typing", handleStopTyping);
       Object.values(typingUserTimeoutsRef.current).forEach(clearTimeout);
@@ -543,6 +578,49 @@ function ValidChat() {
                       {elem.content}
                     </div>
                   )}
+
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {elem.reactions && typeof elem.reactions === 'object' && Object.entries(elem.reactions).map(([emoji, reactors]) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => toggleReaction(elem, emoji)}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs border transition ${
+                          reactors.includes(id)
+                            ? "bg-brand-300/20 border-brand-300/40 text-brand-200"
+                            : "border-white/10 text-white/50 hover:bg-white/5"
+                        }`}
+                      >
+                        {emoji} {reactors.length}
+                      </button>
+                    ))}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setReactionPopup(reactionPopup === elem.timestamp ? null : elem.timestamp)}
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs border border-white/10 text-white/50 hover:bg-white/5 transition"
+                      >
+                        <SmilePlus className="h-3 w-3" />
+                      </button>
+                      {reactionPopup === elem.timestamp && (
+                        <div className="absolute bottom-full left-0 mb-1 flex gap-1 rounded-lg border border-white/10 bg-gray-900 p-1.5 shadow-lg z-50">
+                          {["👍", "❤️", "😂", "😮", "😢", "🔥"].map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              className="rounded p-1 text-lg hover:bg-white/10 transition"
+                              onClick={() => {
+                                toggleReaction(elem, emoji);
+                                setReactionPopup(null);
+                              }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             );

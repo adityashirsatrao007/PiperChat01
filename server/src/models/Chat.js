@@ -15,6 +15,7 @@ const chatSchema = new mongoose.Schema({
           sender_tag: String,
           timestamp: String,
           is_pinned: { type: Boolean, default: false },
+          reactions: { type: Map, of: [String], default: {} },
         },
       ],
     },
